@@ -7,17 +7,9 @@ export default function ResetPassword() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [validSession, setValidSession] = useState(false)
 
-  useEffect(() => {
-    // Supabase fires onAuthStateChange with PASSWORD_RECOVERY
-    // when the user lands here via the reset link
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') setValidSession(true)
-    })
-    return () => subscription.unsubscribe()
-  }, [])
-
+  // Don't wait for PASSWORD_RECOVERY event — if we're on this page
+  // the user came from the reset link, just show the form immediately
   const handleReset = async (e) => {
     e.preventDefault()
     setError('')
@@ -35,6 +27,8 @@ export default function ResetPassword() {
       setError(error.message)
     } else {
       setSuccess(true)
+      // Sign out so they log in fresh with new password
+      await supabase.auth.signOut()
     }
     setLoading(false)
   }
@@ -57,21 +51,6 @@ export default function ResetPassword() {
     )
   }
 
-  if (!validSession) {
-    return (
-      <div style={styles.page}>
-        <div style={styles.card}>
-          <div style={styles.logo}>
-            <span style={styles.logoText}>RIPZILLA</span>
-            <span style={styles.logoSub}>Internal Portal</span>
-          </div>
-          <p style={styles.waiting}>Verifying your reset link...</p>
-          <p style={styles.waitingSub}>If nothing happens, try clicking the link in your email again.</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div style={styles.page}>
       <div style={styles.card}>
@@ -79,6 +58,8 @@ export default function ResetPassword() {
           <span style={styles.logoText}>RIPZILLA</span>
           <span style={styles.logoSub}>Internal Portal</span>
         </div>
+
+        <p style={styles.heading}>Set your password</p>
 
         <form onSubmit={handleReset} style={styles.form}>
           <div style={styles.field}>
@@ -137,7 +118,7 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    marginBottom: '40px',
+    marginBottom: '32px',
     gap: '6px',
   },
   logoText: {
@@ -151,6 +132,12 @@ const styles = {
     letterSpacing: '3px',
     color: '#555570',
     textTransform: 'uppercase',
+  },
+  heading: {
+    color: '#888899',
+    fontSize: '13px',
+    textAlign: 'center',
+    marginBottom: '24px',
   },
   form: {
     display: 'flex',
@@ -217,16 +204,5 @@ const styles = {
   successMsg: {
     color: '#888899',
     fontSize: '13px',
-  },
-  waiting: {
-    color: '#e8e8f0',
-    fontSize: '14px',
-    textAlign: 'center',
-    marginBottom: '8px',
-  },
-  waitingSub: {
-    color: '#555570',
-    fontSize: '12px',
-    textAlign: 'center',
   },
 }
