@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { supabase } from '../supabaseClient'
 
 const tools = [
@@ -28,8 +29,60 @@ const tools = [
 ]
 
 export default function Portal({ user }) {
+  const [showChangePassword, setShowChangePassword] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [pwError, setPwError] = useState('')
+  const [pwSuccess, setPwSuccess] = useState(false)
+  const [pwLoading, setPwLoading] = useState(false)
+
   const handleSignOut = async () => {
     await supabase.auth.signOut()
+  }
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault()
+    setPwError('')
+    setPwSuccess(false)
+
+    if (newPassword !== confirm) {
+      setPwError('Passwords do not match')
+      return
+    }
+    if (newPassword.length < 6) {
+      setPwError('Password must be at least 6 characters')
+      return
+    }
+
+    setPwLoading(true)
+
+    // Re-authenticate with current password first
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: currentPassword,
+    })
+
+    if (signInError) {
+      setPwError('Current password is incorrect')
+      setPwLoading(false)
+      return
+    }
+
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (error) {
+      setPwError(error.message)
+    } else {
+      setPwSuccess(true)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirm('')
+      setTimeout(() => {
+        setShowChangePassword(false)
+        setPwSuccess(false)
+      }, 2000)
+    }
+    setPwLoading(false)
   }
 
   return (
@@ -38,11 +91,69 @@ export default function Portal({ user }) {
         <span style={styles.navLogo}>RIPZILLA</span>
         <div style={styles.navRight}>
           <span style={styles.navEmail}>{user?.email}</span>
+          <button onClick={() => setShowChangePassword(!showChangePassword)} style={styles.navBtn}>
+            Change password
+          </button>
           <button onClick={handleSignOut} style={styles.signOut}>
             Sign out
           </button>
         </div>
       </nav>
+
+      {showChangePassword && (
+        <div style={styles.pwBanner}>
+          <form onSubmit={handleChangePassword} style={styles.pwForm}>
+            <p style={styles.pwTitle}>Change Password</p>
+            <div style={styles.pwFields}>
+              <div style={styles.field}>
+                <label style={styles.label}>Current Password</label>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={e => setCurrentPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  style={styles.input}
+                />
+              </div>
+              <div style={styles.field}>
+                <label style={styles.label}>New Password</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  style={styles.input}
+                />
+              </div>
+              <div style={styles.field}>
+                <label style={styles.label}>Confirm New Password</label>
+                <input
+                  type="password"
+                  value={confirm}
+                  onChange={e => setConfirm(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  style={styles.input}
+                />
+              </div>
+            </div>
+
+            {pwError && <p style={styles.error}>{pwError}</p>}
+            {pwSuccess && <p style={styles.success}>Password updated!</p>}
+
+            <div style={styles.pwActions}>
+              <button type="submit" disabled={pwLoading} style={styles.pwSave}>
+                {pwLoading ? 'Saving...' : 'Save password'}
+              </button>
+              <button type="button" onClick={() => { setShowChangePassword(false); setPwError('') }} style={styles.pwCancel}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <main style={styles.main}>
         <div style={styles.hero}>
@@ -96,11 +207,20 @@ const styles = {
   navRight: {
     display: 'flex',
     alignItems: 'center',
-    gap: '20px',
+    gap: '12px',
   },
   navEmail: {
     fontSize: '13px',
     color: '#555570',
+  },
+  navBtn: {
+    background: 'transparent',
+    border: '1px solid #2a2a3a',
+    borderRadius: '6px',
+    color: '#888899',
+    fontSize: '13px',
+    padding: '6px 14px',
+    cursor: 'pointer',
   },
   signOut: {
     background: 'transparent',
@@ -109,6 +229,87 @@ const styles = {
     color: '#888899',
     fontSize: '13px',
     padding: '6px 14px',
+    cursor: 'pointer',
+  },
+  pwBanner: {
+    background: '#0d0d14',
+    borderBottom: '1px solid #1e1e2e',
+    padding: '24px 40px',
+  },
+  pwForm: {
+    maxWidth: '860px',
+    margin: '0 auto',
+  },
+  pwTitle: {
+    color: '#e8e8f0',
+    fontSize: '14px',
+    fontWeight: '600',
+    marginBottom: '16px',
+  },
+  pwFields: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr 1fr',
+    gap: '16px',
+    marginBottom: '16px',
+  },
+  field: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  label: {
+    fontSize: '12px',
+    color: '#888899',
+    letterSpacing: '0.5px',
+  },
+  input: {
+    background: '#0a0a0f',
+    border: '1px solid #2a2a3a',
+    borderRadius: '8px',
+    padding: '10px 12px',
+    color: '#e8e8f0',
+    fontSize: '13px',
+    outline: 'none',
+  },
+  error: {
+    color: '#ff5555',
+    fontSize: '13px',
+    margin: '0 0 12px',
+    padding: '10px 14px',
+    background: '#1a0d0d',
+    borderRadius: '8px',
+    border: '1px solid #3a1a1a',
+  },
+  success: {
+    color: '#55cc55',
+    fontSize: '13px',
+    margin: '0 0 12px',
+    padding: '10px 14px',
+    background: '#0d1a0d',
+    borderRadius: '8px',
+    border: '1px solid #1a3a1a',
+  },
+  pwActions: {
+    display: 'flex',
+    gap: '10px',
+  },
+  pwSave: {
+    background: '#5c5cff',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '10px 20px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
+  pwCancel: {
+    background: 'transparent',
+    border: '1px solid #2a2a3a',
+    borderRadius: '8px',
+    color: '#888899',
+    padding: '10px 20px',
+    fontSize: '13px',
     cursor: 'pointer',
   },
   main: {
@@ -144,8 +345,6 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '16px',
-    transition: 'border-color 0.2s',
-    cursor: 'default',
   },
   cardIcon: {
     fontSize: '22px',

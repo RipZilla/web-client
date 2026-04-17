@@ -22,9 +22,11 @@ export default function Login() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    console.log('Sending reset to:', email)
+    const { error, data } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/?type=recovery`,
     })
+    console.log('Response:', { error, data })
     if (error) setError(error.message)
     else setResetSent(true)
     setLoading(false)

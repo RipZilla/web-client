@@ -10,7 +10,15 @@ export default function App() {
   const [showReset, setShowReset] = useState(false)
 
   useEffect(() => {
-    // Check if we flagged a recovery before the redirect
+    // Check hash fragment for invite/recovery token BEFORE Supabase processes it
+    const hash = window.location.hash
+    const hashParams = new URLSearchParams(hash.replace('#', ''))
+    const tokenType = hashParams.get('type')
+
+    if (tokenType === 'invite' || tokenType === 'recovery') {
+      localStorage.setItem('pendingReset', 'true')
+    }
+
     const pendingReset = localStorage.getItem('pendingReset')
 
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -29,28 +37,15 @@ export default function App() {
         setShowReset(true)
       }
 
-      // Invite or recovery link — flag it and let Supabase finish redirect
-      if (event === 'SIGNED_IN') {
-        const params = new URLSearchParams(window.location.search)
-        if (params.get('type') === 'recovery') {
-          setShowReset(true)
-          localStorage.removeItem('pendingReset')
-        } else if (localStorage.getItem('pendingReset')) {
-          setShowReset(true)
-          localStorage.removeItem('pendingReset')
-        }
+      if (event === 'SIGNED_IN' && localStorage.getItem('pendingReset')) {
+        setShowReset(true)
+        localStorage.removeItem('pendingReset')
       }
 
       if (event === 'USER_UPDATED') {
         setShowReset(false)
       }
     })
-
-    // If ?type=recovery is in URL, flag it before Supabase processes and redirects
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('type') === 'recovery') {
-      localStorage.setItem('pendingReset', 'true')
-    }
 
     return () => subscription.unsubscribe()
   }, [])
