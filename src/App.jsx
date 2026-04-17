@@ -9,23 +9,27 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [isRecovery, setIsRecovery] = useState(false)
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setLoading(false)
-    })
+useEffect(() => {
+  const params = new URLSearchParams(window.location.search)
+  const isRecoveryUrl = params.get('type') === 'recovery'
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        setIsRecovery(true)
-      } else {
-        setIsRecovery(false)
-      }
-      setSession(session)
-    })
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    setSession(session)
+    setLoading(false)
+    if (isRecoveryUrl && session) setIsRecovery(true)
+  })
 
-    return () => subscription.unsubscribe()
-  }, [])
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      setIsRecovery(true)
+    } else if (!isRecoveryUrl) {
+      setIsRecovery(false)
+    }
+    setSession(session)
+  })
+
+  return () => subscription.unsubscribe()
+}, [])
 
   if (loading) return <div style={{ minHeight: '100vh', background: '#0a0a0f' }} />
   if (isRecovery) return <ResetPassword />
