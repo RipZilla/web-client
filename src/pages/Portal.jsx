@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import BreakReport from '../components/BreakReport'
 import CardSetManager from '../components/CardSetManager'
+import AddStream from '../components/AddStream'
 
 const API_URL = import.meta.env.VITE_API_URL
 
@@ -49,6 +50,21 @@ function getGreeting() {
   return 'Good evening'
 }
 
+function formatStreamTime(iso) {
+  const dt = new Date(iso)
+  return dt.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function timeUntil(iso) {
+  const diff = new Date(iso) - new Date()
+  if (diff < 0) return 'Live now'
+  const h = Math.floor(diff / 3600000)
+  const m = Math.floor((diff % 3600000) / 60000)
+  if (h > 48) return `In ${Math.floor(h / 24)} days`
+  if (h > 0)  return `In ${h}h ${m}m`
+  return `In ${m}m`
+}
+
 export default function Portal({ user }) {
   const [activeTool, setActiveTool]           = useState(null)
   const [sidebarOpen, setSidebarOpen]         = useState(false)
@@ -61,9 +77,11 @@ export default function Portal({ user }) {
   const [pwLoading, setPwLoading]             = useState(false)
   const [availableSets, setAvailableSets]     = useState([])
   const [clock, setClock]                     = useState('')
+  const [streams, setStreams]                 = useState([])
 
   useEffect(() => {
     fetchSets()
+    fetchStreams()
     const tick = () => setClock(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
     tick()
     const id = setInterval(tick, 1000)
@@ -76,6 +94,24 @@ export default function Portal({ user }) {
       const data = await res.json()
       setAvailableSets(data.sets || [])
     } catch (e) { console.error('Failed to fetch sets:', e) }
+  }
+
+  const fetchStreams = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('streams')
+        .select('*')
+        .gte('starts_at', new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString()) // include up to 3h ago (live)
+        .order('starts_at', { ascending: true })
+      if (!error) setStreams(data || [])
+    } catch (e) { console.error('Failed to fetch streams:', e) }
+  }
+
+  const handleDeleteStream = async (id) => {
+    try {
+      await fetch(`${API_URL}/streams/${id}`, { method: 'DELETE' })
+      setStreams(prev => prev.filter(s => s.id !== id))
+    } catch (e) { console.error('Failed to delete stream:', e) }
   }
 
   const handleSignOut = async () => { await supabase.auth.signOut() }
@@ -103,13 +139,7 @@ export default function Portal({ user }) {
   return (
     <div style={s.page}>
 
-      {/* Overlay */}
-      {sidebarOpen && (
-        <div
-          onClick={() => setSidebarOpen(false)}
-          style={s.overlay}
-        />
-      )}
+      {sidebarOpen && <div onClick={() => setSidebarOpen(false)} style={s.overlay} />}
 
       {/* Sidebar */}
       <div style={{ ...s.sidebar, transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)' }}>
@@ -133,6 +163,11 @@ export default function Portal({ user }) {
               {t.title}
             </button>
           ))}
+          <p style={s.sbSection}>Streams</p>
+          <button onClick={() => { setActiveTool('add-stream'); setSidebarOpen(false) }} style={{ ...s.sbItem, ...(activeTool === 'add-stream' ? s.sbActive : {}) }}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.2"/><path d="M7 4v6M4 7h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
+            Add Stream
+          </button>
           <div style={s.sbDivider} />
           <button onClick={() => { setShowPw(true); setSidebarOpen(false) }} style={s.sbItem}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.2"/><circle cx="7" cy="7" r="2" fill="currentColor" opacity="0.5"/></svg>
@@ -155,7 +190,9 @@ export default function Portal({ user }) {
           </button>
           <div style={s.breadcrumb}>
             <span style={s.navLogo} onClick={() => setActiveTool(null)}>RIPZILLA</span>
-            {currentTool && <><span style={s.sep}>/</span><span style={s.pageName}>{currentTool.title}</span></>}
+            {(currentTool || activeTool === 'add-stream') && (
+              <><span style={s.sep}>/</span><span style={s.pageName}>{currentTool?.title || 'Add Stream'}</span></>
+            )}
           </div>
         </div>
         <div style={s.navRight}>
@@ -192,6 +229,8 @@ export default function Portal({ user }) {
 
       {/* Main */}
       <main style={s.main}>
+
+        {/* Home */}
         {!activeTool && (
           <>
             <div style={s.greeting}>
@@ -199,6 +238,7 @@ export default function Portal({ user }) {
               <h1 style={s.greetingTitle}>Welcome back.</h1>
               <p style={s.greetingSub}>What are we working on today?</p>
             </div>
+
             <p style={s.sectionLabel}>Tools</p>
             <div style={s.grid}>
               {TOOLS.map(tool => (
@@ -218,10 +258,40 @@ export default function Portal({ user }) {
                 </button>
               ))}
             </div>
+
+            {/* Upcoming Streams */}
+            {streams.length > 0 && (
+              <div style={s.streamsSection}>
+                <p style={s.sectionLabel}>Upcoming Streams</p>
+                <div style={s.streamsList}>
+                  {streams.map(stream => {
+                    const isLive = new Date(stream.starts_at) <= new Date()
+                    return (
+                      <div key={stream.id} style={s.streamCard}>
+                        <div style={s.streamLeft}>
+                          <div style={{ ...s.streamLiveDot, background: isLive ? '#1d9e75' : '#2a2a4a' }} />
+                          <div>
+                            <a href={stream.url} target="_blank" rel="noreferrer" style={s.streamTitle}>{stream.title}</a>
+                            <p style={s.streamTime}>{formatStreamTime(stream.starts_at)}</p>
+                          </div>
+                        </div>
+                        <div style={s.streamRight}>
+                          <span style={{ ...s.streamBadge, background: isLive ? '#0a1a0f' : '#0f0f1a', color: isLive ? '#1d9e75' : '#3a3a6a', border: `1px solid ${isLive ? '#0f3a20' : '#1e1e3a'}` }}>
+                            {timeUntil(stream.starts_at)}
+                          </span>
+                          <button onClick={() => handleDeleteStream(stream.id)} style={s.deleteBtn} title="Remove stream">✕</button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </>
         )}
 
-        {activeTool && (
+        {/* Tool views */}
+        {activeTool && activeTool !== 'add-stream' && (
           <div style={s.toolView}>
             <button onClick={() => setActiveTool(null)} style={s.backBtn}>
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M7 2L3 6l4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -229,6 +299,16 @@ export default function Portal({ user }) {
             </button>
             {activeTool === 'break-report' && <BreakReport availableSets={availableSets} onSetsRefresh={fetchSets} />}
             {activeTool === 'card-sets'    && <CardSetManager onSetUploaded={fetchSets} />}
+          </div>
+        )}
+
+        {activeTool === 'add-stream' && (
+          <div style={s.toolView}>
+            <button onClick={() => setActiveTool(null)} style={s.backBtn}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M7 2L3 6l4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Back to home
+            </button>
+            <AddStream onStreamAdded={() => { fetchStreams(); setActiveTool(null) }} />
           </div>
         )}
       </main>
@@ -244,39 +324,20 @@ export default function Portal({ user }) {
 }
 
 const s = {
-  page: {
-    minHeight: '100vh', background: '#0a0a0f', fontFamily: "'Inter', sans-serif",
-    color: '#e8e8f0', display: 'flex', flexDirection: 'column',
-  },
-
-  overlay: {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
-    zIndex: 98,
-  },
-
-  sidebar: {
-    position: 'fixed', top: 0, left: 0, height: '100vh', width: '230px',
-    background: '#0d0d14', borderRight: '1px solid #1a1a26',
-    display: 'flex', flexDirection: 'column',
-    transition: 'transform 0.24s cubic-bezier(.4,0,.2,1)',
-    zIndex: 99,
-  },
+  page: { minHeight: '100vh', background: '#0a0a0f', fontFamily: "'Inter', sans-serif", color: '#e8e8f0', display: 'flex', flexDirection: 'column' },
+  overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 98 },
+  sidebar: { position: 'fixed', top: 0, left: 0, height: '100vh', width: '230px', background: '#0d0d14', borderRight: '1px solid #1a1a26', display: 'flex', flexDirection: 'column', transition: 'transform 0.24s cubic-bezier(.4,0,.2,1)', zIndex: 99 },
   sbTop: { padding: '24px 18px 16px', borderBottom: '1px solid #1a1a26' },
   sbLabel: { fontSize: '9px', letterSpacing: '2.5px', color: '#2a2a3a', textTransform: 'uppercase', marginBottom: '10px' },
   sbUser: { display: 'flex', alignItems: 'center', gap: '10px' },
   sbAvatar: { width: '32px', height: '32px', borderRadius: '50%', background: '#1a1a2e', border: '1px solid #2a2a4a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', color: '#5c5cff', flexShrink: 0 },
   sbEmail: { fontSize: '11px', color: '#444460', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  sbNav: { padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: '2px', flex: 1 },
+  sbNav: { padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: '2px', flex: 1, overflowY: 'auto' },
   sbSection: { fontSize: '9px', letterSpacing: '2px', color: '#222235', textTransform: 'uppercase', padding: '10px 8px 4px', margin: 0 },
   sbItem: { display: 'flex', alignItems: 'center', gap: '10px', background: 'transparent', border: 'none', borderRadius: '8px', color: '#333350', fontSize: '13px', padding: '10px 10px', cursor: 'pointer', width: '100%', textAlign: 'left' },
   sbActive: { background: '#1a1a2e', color: '#e8e8f0', borderLeft: '2px solid #5c5cff', paddingLeft: '8px' },
   sbDivider: { height: '1px', background: '#1a1a26', margin: '8px 0' },
-
-  nav: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '0 28px', height: '60px', background: '#0d0d14',
-    borderBottom: '1px solid #1a1a26', position: 'sticky', top: 0, zIndex: 50,
-  },
+  nav: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 28px', height: '60px', background: '#0d0d14', borderBottom: '1px solid #1a1a26', position: 'sticky', top: 0, zIndex: 50 },
   navLeft: { display: 'flex', alignItems: 'center', gap: '16px' },
   hamburger: { background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '5px', padding: '6px', borderRadius: '6px' },
   hline: { display: 'block', width: '20px', height: '2px', background: '#888899', borderRadius: '2px', transition: 'all 0.22s ease' },
@@ -287,7 +348,6 @@ const s = {
   navRight: { display: 'flex', alignItems: 'center', gap: '10px' },
   navEmail: { fontSize: '12px', color: '#2a2a3a' },
   onlineDot: { width: '7px', height: '7px', borderRadius: '50%', background: '#1d9e75' },
-
   pwBanner: { background: '#0d0d14', borderBottom: '1px solid #1a1a26', padding: '28px 40px' },
   pwForm: { maxWidth: '860px', margin: '0 auto' },
   pwHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' },
@@ -302,24 +362,14 @@ const s = {
   pwActions: { display: 'flex', gap: '10px' },
   pwSave: { background: '#5c5cff', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 22px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' },
   pwCancel: { background: 'transparent', border: '1px solid #1e1e2e', borderRadius: '8px', color: '#555570', padding: '10px 22px', fontSize: '13px', cursor: 'pointer' },
-
   main: { flex: 1, maxWidth: '960px', width: '100%', margin: '0 auto', padding: '64px 32px' },
-
   greeting: { marginBottom: '56px', textAlign: 'center' },
   greetingTime: { fontSize: '11px', letterSpacing: '3px', color: '#2a2a4a', textTransform: 'uppercase', marginBottom: '14px' },
   greetingTitle: { fontSize: '42px', fontWeight: '700', color: '#e8e8f0', margin: '0 0 10px' },
   greetingSub: { fontSize: '16px', color: '#333350' },
-
   sectionLabel: { fontSize: '11px', letterSpacing: '2px', color: '#2a2a4a', textTransform: 'uppercase', marginBottom: '20px', textAlign: 'center' },
-
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' },
-
-  toolCard: {
-    background: '#0d0d14', border: '1px solid #1a1a26', borderRadius: '18px',
-    padding: '0', cursor: 'pointer', textAlign: 'left', overflow: 'hidden',
-    transition: 'border-color 0.15s, transform 0.12s',
-    width: '100%',
-  },
+  toolCard: { background: '#0d0d14', border: '1px solid #1a1a26', borderRadius: '18px', padding: '0', cursor: 'pointer', textAlign: 'left', overflow: 'hidden', transition: 'border-color 0.15s, transform 0.12s', width: '100%' },
   cardAccent: { height: '4px' },
   cardBody: { padding: '32px 28px 28px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' },
   cardIconWrap: { marginBottom: '20px' },
@@ -329,10 +379,18 @@ const s = {
   cardFooter: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' },
   cardTag: { fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase', padding: '4px 10px', borderRadius: '5px', fontWeight: '600' },
   cardArrow: { fontSize: '20px', fontWeight: '300' },
-
+  streamsSection: { marginTop: '56px' },
+  streamsList: { display: 'flex', flexDirection: 'column', gap: '10px' },
+  streamCard: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0d0d14', border: '1px solid #1a1a26', borderRadius: '12px', padding: '16px 20px' },
+  streamLeft: { display: 'flex', alignItems: 'center', gap: '14px' },
+  streamLiveDot: { width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0 },
+  streamTitle: { fontSize: '14px', fontWeight: '600', color: '#c8c8d8', textDecoration: 'none', display: 'block', marginBottom: '3px' },
+  streamTime: { fontSize: '12px', color: '#333350', margin: 0 },
+  streamRight: { display: 'flex', alignItems: 'center', gap: '10px' },
+  streamBadge: { fontSize: '11px', fontWeight: '600', padding: '4px 10px', borderRadius: '6px' },
+  deleteBtn: { background: 'transparent', border: 'none', color: '#2a2a3a', fontSize: '13px', cursor: 'pointer', padding: '4px 6px', borderRadius: '4px' },
   toolView: { display: 'flex', flexDirection: 'column', gap: '24px' },
   backBtn: { display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: '1px solid #1a1a26', borderRadius: '8px', color: '#333350', fontSize: '13px', padding: '8px 16px', cursor: 'pointer', alignSelf: 'flex-start' },
-
   statusBar: { display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 28px', background: '#0d0d14', borderTop: '1px solid #1a1a26' },
   statusDot: { width: '6px', height: '6px', borderRadius: '50%', background: '#1d9e75' },
   statusText: { fontSize: '11px', color: '#1a3a28', letterSpacing: '0.5px' },
