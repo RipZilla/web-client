@@ -9,37 +9,53 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [showReset, setShowReset] = useState(false)
 
-  const params = new URLSearchParams(window.location.search)
-  const isRecovery = params.get('type') === 'recovery'
-
   useEffect(() => {
+    // Check if we flagged a recovery before the redirect
+    const pendingReset = localStorage.getItem('pendingReset')
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setLoading(false)
+      if (pendingReset && session) {
+        setShowReset(true)
+        localStorage.removeItem('pendingReset')
+      }
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
 
-      // Show reset page for password recovery AND new user invites
       if (event === 'PASSWORD_RECOVERY') {
         setShowReset(true)
       }
 
-      if (event === 'SIGNED_IN' && isRecovery) {
-        setShowReset(true)
+      // Invite or recovery link — flag it and let Supabase finish redirect
+      if (event === 'SIGNED_IN') {
+        const params = new URLSearchParams(window.location.search)
+        if (params.get('type') === 'recovery') {
+          setShowReset(true)
+          localStorage.removeItem('pendingReset')
+        } else if (localStorage.getItem('pendingReset')) {
+          setShowReset(true)
+          localStorage.removeItem('pendingReset')
+        }
       }
 
-      // Once they've updated their password, clear the reset state
       if (event === 'USER_UPDATED') {
         setShowReset(false)
       }
     })
 
+    // If ?type=recovery is in URL, flag it before Supabase processes and redirects
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('type') === 'recovery') {
+      localStorage.setItem('pendingReset', 'true')
+    }
+
     return () => subscription.unsubscribe()
-  }, [isRecovery])
+  }, [])
 
   if (loading) return <div style={{ minHeight: '100vh', background: '#0a0a0f' }} />
-  if (showReset || (session && isRecovery)) return <ResetPassword />
+  if (showReset) return <ResetPassword />
   return session ? <Portal user={session.user} /> : <Login />
 }
