@@ -1,0 +1,195 @@
+/* ==========================================================================
+   Riphub design system — tokens, reset, primitives
+   Mirrors riphub-landing.html so the portal and the marketing site read as
+   one product. Change a value here, it changes everywhere.
+   ========================================================================== */
+
+:root{
+  /* ---- ground ---- */
+  --bg:#0A0A0C;
+  --bg-2:#0F0F13;
+  --panel:#121217;
+  --panel-2:#16161C;
+
+  /* ---- ink ---- */
+  --ink:#F4F2EC;
+  --muted:#96948C;
+  --faint:#5C5B56;
+
+  /* ---- hairlines ---- */
+  --line:rgba(244,242,236,.08);
+  --line-strong:rgba(244,242,236,.14);
+  --line-bright:rgba(244,242,236,.3);
+
+  /* ---- brand accent (swapped per category — see CATEGORY THEMES below) ---- */
+  --accent:#F3C94E;
+  --accent-hi:#FFDA6B;
+  --accent-lo:#DBAE35;
+  --accent-ink:#171204;
+
+  /* Derived from --accent so every tint follows the category automatically.
+     Never hard-code the accent's rgba() again — use these or color-mix(). */
+  --accent-soft:color-mix(in srgb, var(--accent) 10%, transparent);
+  --accent-line:color-mix(in srgb, var(--accent) 25%, transparent);
+  --accent-glow:color-mix(in srgb, var(--accent) 45%, transparent);
+
+  /* ---- semantics (from the landing dashboard) ---- */
+  --pos:#8CD9A0;
+  --pos-bg:rgba(90,200,130,.1);
+  --pos-line:rgba(90,200,130,.22);
+  --neg:#E28B7B;
+  --neg-bg:rgba(226,139,123,.09);
+  --neg-line:rgba(226,139,123,.24);
+  --info:#9BB8E8;
+  --info-bg:rgba(120,160,230,.1);
+
+  /* ---- type ---- */
+  --disp:'Schibsted Grotesk',system-ui,sans-serif;
+  --body:'Inter',system-ui,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,monospace;
+
+  /* ---- motion ---- */
+  --ease-heavy:cubic-bezier(.5,.06,.12,1);
+  --ease-out:cubic-bezier(.22,1,.36,1);
+
+  /* ---- metrics ---- */
+  --nav-h:64px;
+  --sidebar-w:236px;
+  --r-sm:8px;
+  --r-md:11px;
+  --r-lg:14px;
+  --r-xl:20px;
+
+  /* ---- theme cross-fade ---- */
+  --theme-ms:650ms;
+}
+
+
+/* ---------- category theming ----------
+   @property makes these animatable: the browser interpolates the colour
+   itself, so a category switch cross-fades every button, icon, chip, ring
+   and glow at once instead of snapping. Falls back to an instant swap on
+   engines without @property. Ground and ink never change, so all four
+   categories still read as the same product. */
+@property --accent     { syntax:'<color>'; inherits:true; initial-value:#F3C94E }
+@property --accent-hi  { syntax:'<color>'; inherits:true; initial-value:#FFDA6B }
+@property --accent-lo  { syntax:'<color>'; inherits:true; initial-value:#DBAE35 }
+@property --accent-ink { syntax:'<color>'; inherits:true; initial-value:#171204 }
+
+:root{
+  transition:
+    --accent     var(--theme-ms) var(--ease-out),
+    --accent-hi  var(--theme-ms) var(--ease-out),
+    --accent-lo  var(--theme-ms) var(--ease-out),
+    --accent-ink var(--theme-ms) var(--ease-out);
+}
+
+/* Pokémon keeps the original brand gold (the :root defaults above). */
+:root[data-category="nba"]{
+  --accent:#E8833A; --accent-hi:#FFA05C; --accent-lo:#C96A26; --accent-ink:#1A0D03;
+}
+:root[data-category="nfl"]{
+  --accent:#4FAE72; --accent-hi:#6FD293; --accent-lo:#3B8D5A; --accent-ink:#04160B;
+}
+/* Cool steel rather than a literal silver: a near-white accent collides with
+   --ink (#F4F2EC), which made emphasis text and icons read as disabled. */
+:root[data-category="bullion"]{
+  --accent:#8FAECE; --accent-hi:#B6CDE6; --accent-lo:#6C8AAC; --accent-ink:#08121C;
+}
+
+/* ---------- reset ---------- */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--body);
+  font-size:16px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  overflow-x:hidden;
+}
+::selection{background:color-mix(in srgb, var(--accent) 28%, transparent)}
+img{display:block;max-width:100%}
+a{color:inherit;text-decoration:none}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,select,textarea{font-family:inherit}
+svg{display:block}
+
+/* thin, on-brand scrollbars */
+*{scrollbar-width:thin;scrollbar-color:rgba(244,242,236,.14) transparent}
+*::-webkit-scrollbar{width:9px;height:9px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:rgba(244,242,236,.12);border-radius:9px;border:2px solid transparent;background-clip:content-box}
+*::-webkit-scrollbar-thumb:hover{background:rgba(244,242,236,.22);background-clip:content-box}
+
+/* ---------- film grain (identical to the landing page) ---------- */
+.grain{
+  position:fixed;inset:0;pointer-events:none;z-index:2000;opacity:.35;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+}
+
+/* ---------- typography primitives ---------- */
+.eyebrow{
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.22em;
+  color:var(--muted);text-transform:uppercase;font-weight:500;
+  display:inline-flex;align-items:center;
+}
+.eyebrow .tick{color:var(--accent);margin-right:10px;transition:color var(--theme-ms) var(--ease-out)}
+
+.kicker{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--faint);font-weight:500;
+}
+
+.display{
+  font-family:var(--disp);font-weight:700;letter-spacing:-.025em;line-height:1.06;
+  font-size:clamp(32px,4vw,44px);
+}
+.h2{font-family:var(--disp);font-size:22px;font-weight:600;letter-spacing:-.015em;line-height:1.25}
+.h3{font-family:var(--disp);font-size:17px;font-weight:600;letter-spacing:-.01em;line-height:1.3}
+
+.muted{color:var(--muted)}
+.faint{color:var(--faint)}
+.mono{font-family:var(--mono)}
+.lead{font-size:16px;color:var(--muted);line-height:1.65;font-weight:450}
+
+/* ---------- atmosphere ---------- */
+.glow-top{
+  position:absolute;left:50%;top:-40%;width:1100px;height:800px;
+  transform:translateX(-50%);pointer-events:none;
+  background:radial-gradient(closest-side, rgba(244,242,236,.05), transparent 70%);
+}
+.glow-gold{
+  position:absolute;left:50%;top:-30%;width:820px;height:620px;
+  transform:translateX(-50%);pointer-events:none;
+  background:radial-gradient(closest-side,
+    color-mix(in srgb, var(--accent) 11%, transparent),
+    color-mix(in srgb, var(--accent) 2%, transparent) 55%, transparent 76%);
+  transition:background var(--theme-ms) var(--ease-out);
+}
+
+/* ---------- entrance motion ---------- */
+.rv{opacity:0;transform:translateY(18px);animation:rise 1.1s var(--ease-out) forwards}
+.rv.d1{animation-delay:.06s}
+.rv.d2{animation-delay:.14s}
+.rv.d3{animation-delay:.24s}
+.rv.d4{animation-delay:.34s}
+.rv.d5{animation-delay:.44s}
+@keyframes rise{to{opacity:1;transform:none}}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse-dot{
+  0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(140,217,160,.5)}
+  50%{opacity:.75;box-shadow:0 0 0 5px rgba(140,217,160,0)}
+}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms !important;animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;
+  }
+  html{scroll-behavior:auto}
+  .rv{opacity:1;transform:none}
+}

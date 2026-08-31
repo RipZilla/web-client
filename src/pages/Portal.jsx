@@ -2,46 +2,39 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import BreakReport from '../components/BreakReport'
 import CardSetManager from '../components/CardSetManager'
+import BreakRoi from '../components/BreakRoi'
 import AddStream from '../components/AddStream'
-
-const API_URL = import.meta.env.VITE_API_URL
+import { Icon, Alert, Field, Spinner } from '../components/ui'
+import { apiFetch } from '../lib/api'
+import {
+  CATEGORIES, getCategory, loadCategory, saveCategory, applyCategoryTheme,
+} from '../lib/categories'
 
 const TOOLS = [
   {
     id: 'break-report',
     title: 'Break Report',
     sub: 'Select two card sets and upload your Whatnot CSV to generate a formatted Excel report.',
-    tag: 'Report generator',
-    accentColor: '#5c5cff',
-    iconBg: '#0f0f28',
-    tagBg: '#0f0f28',
-    tagColor: '#5c5cff',
-    icon: (
-      <svg width="28" height="28" viewBox="0 0 22 22" fill="none">
-        <path d="M3 6h16M3 10h10M3 14h12" stroke="#5c5cff" strokeWidth="2" strokeLinecap="round"/>
-        <circle cx="17" cy="14" r="4" fill="#5c5cff" opacity="0.2" stroke="#5c5cff" strokeWidth="1.4"/>
-        <path d="M15.5 14l1 1 2-2" stroke="#5c5cff" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-    ),
+    kicker: 'Report generator',
+    icon: Icon.report,
+  },
+  {
+    id: 'break-roi',
+    title: 'Break ROI',
+    sub: 'Paste a Whatnot export to price the products in a break against what the spots actually sold for.',
+    kicker: 'Risk analysis',
+    icon: Icon.trend,
   },
   {
     id: 'card-sets',
     title: 'Card Set Manager',
-    sub: 'Generate card set tables from raw data or upload existing sets to the server.',
-    tag: 'Set management',
-    accentColor: '#1d9e75',
-    iconBg: '#0a1a14',
-    tagBg: '#0a1a14',
-    tagColor: '#1d9e75',
-    icon: (
-      <svg width="28" height="28" viewBox="0 0 22 22" fill="none">
-        <rect x="2" y="4" width="12" height="16" rx="2" fill="#1d9e75" opacity="0.2" stroke="#1d9e75" strokeWidth="1.4"/>
-        <rect x="8" y="2" width="12" height="16" rx="2" fill="#1d9e75" opacity="0.1" stroke="#1d9e75" strokeWidth="1.4"/>
-        <path d="M10 9h6M10 12h4" stroke="#1d9e75" strokeWidth="1.5" strokeLinecap="round"/>
-      </svg>
-    ),
+    sub: 'Generate card set tables from raw data, or upload existing sets to the server.',
+    kicker: 'Set management',
+    icon: Icon.layers,
   },
 ]
+
+const ADD_STREAM = { id: 'add-stream', title: 'Add Stream', icon: Icon.broadcast }
 
 function getGreeting() {
   const h = new Date().getHours()
@@ -78,6 +71,7 @@ export default function Portal({ user }) {
   const [availableSets, setAvailableSets]     = useState([])
   const [clock, setClock]                     = useState('')
   const [streams, setStreams]                 = useState([])
+  const [category, setCategory]               = useState(loadCategory)
 
   useEffect(() => {
     fetchSets()
@@ -88,9 +82,21 @@ export default function Portal({ user }) {
     return () => clearInterval(id)
   }, [])
 
+  // Escape closes whatever overlay is open
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      if (showPw) { setShowPw(false); setPwError('') }
+      else if (sidebarOpen) setSidebarOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [showPw, sidebarOpen])
+
   const fetchSets = async () => {
     try {
-      const res = await fetch(`${API_URL}/sets`)
+      const res = await apiFetch('/sets')
+      if (!res.ok) return
       const data = await res.json()
       setAvailableSets(data.sets || [])
     } catch (e) { console.error('Failed to fetch sets:', e) }
@@ -109,7 +115,8 @@ export default function Portal({ user }) {
 
   const handleDeleteStream = async (id) => {
     try {
-      await fetch(`${API_URL}/streams/${id}`, { method: 'DELETE' })
+      const res = await apiFetch(`/streams/${id}`, { method: 'DELETE' })
+      if (!res.ok) return
       setStreams(prev => prev.filter(s => s.id !== id))
     } catch (e) { console.error('Failed to delete stream:', e) }
   }
@@ -133,266 +140,310 @@ export default function Portal({ user }) {
     setPwLoading(false)
   }
 
+  const go = (id) => { setActiveTool(id); setSidebarOpen(false) }
+
+  const chooseCategory = (id) => {
+    setCategory(id)
+    saveCategory(id)
+    applyCategoryTheme(id)   // CSS cross-fades the accent from here
+    setActiveTool(null)      // tools are category-specific; don't strand the user in one
+    setSidebarOpen(false)
+  }
+
+  const active = getCategory(category)
+  const locked = !active.available
   const currentTool = TOOLS.find(t => t.id === activeTool)
+  const crumbName = currentTool?.title || (activeTool === ADD_STREAM.id ? ADD_STREAM.title : null)
   const initials = user?.email?.slice(0, 2).toUpperCase() || 'RZ'
 
   return (
-    <div style={s.page}>
+    <div className="app">
+      <div className="grain" />
 
-      {sidebarOpen && <div onClick={() => setSidebarOpen(false)} style={s.overlay} />}
+      {sidebarOpen && <div className="sb-overlay" onClick={() => setSidebarOpen(false)} />}
 
-      {/* Sidebar */}
-      <div style={{ ...s.sidebar, transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)' }}>
-        <div style={s.sbTop}>
-          <p style={s.sbLabel}>Signed in as</p>
-          <div style={s.sbUser}>
-            <div style={s.sbAvatar}>{initials}</div>
-            <span style={s.sbEmail}>{user?.email}</span>
+      {/* ---------- sidebar ---------- */}
+      <aside className={`sidebar${sidebarOpen ? ' open' : ''}`} aria-hidden={!sidebarOpen}>
+        <div className="sb-top">
+          <div className="sb-brand">
+            <div className="logo-mark" />
+            <span className="wordmark sm">RIPZILLA</span>
+          </div>
+          <div className="sb-user">
+            <div className="sb-avatar">{initials}</div>
+            <span className="sb-email" title={user?.email}>{user?.email}</span>
           </div>
         </div>
-        <div style={s.sbNav}>
-          <p style={s.sbSection}>Navigation</p>
-          <button onClick={() => { setActiveTool(null); setSidebarOpen(false) }} style={{ ...s.sbItem, ...(activeTool === null ? s.sbActive : {}) }}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="5" height="5" rx="1" fill="currentColor" opacity="0.7"/><rect x="8" y="1" width="5" height="5" rx="1" fill="currentColor" opacity="0.7"/><rect x="1" y="8" width="5" height="5" rx="1" fill="currentColor" opacity="0.7"/><rect x="8" y="8" width="5" height="5" rx="1" fill="currentColor" opacity="0.7"/></svg>
-            Home
+
+        <nav className="sb-nav">
+          <p className="sb-section">Workspace</p>
+          <button className={`sb-item${activeTool === null ? ' on' : ''}`} onClick={() => go(null)}>
+            {Icon.home(15)} Home
           </button>
-          <p style={s.sbSection}>Tools</p>
+
+          <p className="sb-section">Tools</p>
           {TOOLS.map(t => (
-            <button key={t.id} onClick={() => { setActiveTool(t.id); setSidebarOpen(false) }} style={{ ...s.sbItem, ...(activeTool === t.id ? s.sbActive : {}) }}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="3" width="8" height="9" rx="1.5" fill="currentColor" opacity="0.4"/><rect x="5" y="1" width="8" height="9" rx="1.5" fill="currentColor" opacity="0.6"/></svg>
-              {t.title}
+            <button
+              key={t.id}
+              className={`sb-item${activeTool === t.id ? ' on' : ''}`}
+              onClick={() => go(t.id)}
+              disabled={locked}
+              title={locked ? `Not available for ${active.label} yet` : t.title}
+            >
+              {t.icon(15)} {t.title}
             </button>
           ))}
-          <p style={s.sbSection}>Streams</p>
-          <button onClick={() => { setActiveTool('add-stream'); setSidebarOpen(false) }} style={{ ...s.sbItem, ...(activeTool === 'add-stream' ? s.sbActive : {}) }}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.2"/><path d="M7 4v6M4 7h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
-            Add Stream
-          </button>
-          <div style={s.sbDivider} />
-          <button onClick={() => { setShowPw(true); setSidebarOpen(false) }} style={s.sbItem}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.2"/><circle cx="7" cy="7" r="2" fill="currentColor" opacity="0.5"/></svg>
-            Settings
-          </button>
-          <button onClick={handleSignOut} style={{ ...s.sbItem, color: '#ff5555' }}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9 7H3M9 7L7 5M9 7L7 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><path d="M11 2v10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.5"/></svg>
-            Sign out
-          </button>
-        </div>
-      </div>
 
-      {/* Nav */}
-      <nav style={s.nav}>
-        <div style={s.navLeft}>
-          <button onClick={() => setSidebarOpen(v => !v)} style={s.hamburger}>
-            <span style={{ ...s.hline, transform: sidebarOpen ? 'translateY(7px) rotate(45deg)' : 'none' }} />
-            <span style={{ ...s.hline, opacity: sidebarOpen ? 0 : 1 }} />
-            <span style={{ ...s.hline, transform: sidebarOpen ? 'translateY(-7px) rotate(-45deg)' : 'none' }} />
+          <p className="sb-section">Streams</p>
+          <button
+            className={`sb-item${activeTool === ADD_STREAM.id ? ' on' : ''}`}
+            onClick={() => go(ADD_STREAM.id)}
+            disabled={locked}
+            title={locked ? `Not available for ${active.label} yet` : ADD_STREAM.title}
+          >
+            {ADD_STREAM.icon(15)} Add Stream
           </button>
-          <div style={s.breadcrumb}>
-            <span style={s.navLogo} onClick={() => setActiveTool(null)}>RIPZILLA</span>
-            {(currentTool || activeTool === 'add-stream') && (
-              <><span style={s.sep}>/</span><span style={s.pageName}>{currentTool?.title || 'Add Stream'}</span></>
+
+          <div className="sb-divider" />
+          <button className="sb-item" onClick={() => { setShowPw(true); setSidebarOpen(false) }}>
+            {Icon.key(15)} Change password
+          </button>
+          <button className="sb-item danger" onClick={handleSignOut}>
+            {Icon.signout(15)} Sign out
+          </button>
+        </nav>
+
+        <div className="sb-foot">Internal Portal</div>
+      </aside>
+
+      {/* ---------- top bar ---------- */}
+      <header className="app-nav">
+        <div className="nav-left">
+          <button
+            className={`hamburger${sidebarOpen ? ' on' : ''}`}
+            onClick={() => setSidebarOpen(v => !v)}
+            aria-label={sidebarOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={sidebarOpen}
+          >
+            <span style={{ transform: sidebarOpen ? 'translateY(6.5px) rotate(45deg)' : 'none' }} />
+            <span style={{ opacity: sidebarOpen ? 0 : 1 }} />
+            <span style={{ transform: sidebarOpen ? 'translateY(-6.5px) rotate(-45deg)' : 'none' }} />
+          </button>
+
+          <div className="crumb">
+            <button className="logo" onClick={() => setActiveTool(null)}>
+              <span className="logo-mark" />
+              <span className="wordmark sm">RIPZILLA</span>
+            </button>
+            {crumbName && (
+              <>
+                <span className="crumb-sep">/</span>
+                <span className="crumb-now">{crumbName}</span>
+              </>
             )}
           </div>
         </div>
-        <div style={s.navRight}>
-          <div style={s.onlineDot} />
-          <span style={s.navEmail}>{user?.email}</span>
-        </div>
-      </nav>
 
-      {/* Change password */}
+        <div className="catbar" role="tablist" aria-label="Product category">
+          {CATEGORIES.map(c => (
+            <button
+              key={c.id}
+              role="tab"
+              aria-selected={c.id === category}
+              className={`cat${c.id === category ? ' on' : ''}`}
+              onClick={() => chooseCategory(c.id)}
+              title={c.available ? c.label : `${c.label} — in development`}
+            >
+              <span className="cat-dot" />
+              {c.label}
+              {!c.available && <span className="cat-soon">Soon</span>}
+            </button>
+          ))}
+        </div>
+
+        <div className="nav-right">
+          <span className="dot dot-live" />
+          <span className="nav-email" title={user?.email}>{user?.email}</span>
+        </div>
+      </header>
+
+      {/* ---------- change password ---------- */}
       {showPw && (
-        <div style={s.pwBanner}>
-          <form onSubmit={handleChangePassword} style={s.pwForm}>
-            <div style={s.pwHeader}>
-              <p style={s.pwTitle}>Change Password</p>
-              <button type="button" onClick={() => { setShowPw(false); setPwError('') }} style={s.pwClose}>✕</button>
-            </div>
-            <div style={s.pwFields}>
-              {[['Current Password', currentPassword, setCurrentPassword], ['New Password', newPassword, setNewPassword], ['Confirm New Password', confirm, setConfirm]].map(([label, val, setter]) => (
-                <div key={label} style={s.field}>
-                  <label style={s.label}>{label}</label>
-                  <input type="password" value={val} onChange={e => setter(e.target.value)} placeholder="••••••••" required style={s.input} />
-                </div>
-              ))}
-            </div>
-            {pwError   && <p style={s.error}>{pwError}</p>}
-            {pwSuccess && <p style={s.success}>Password updated!</p>}
-            <div style={s.pwActions}>
-              <button type="submit" disabled={pwLoading} style={s.pwSave}>{pwLoading ? 'Saving...' : 'Save password'}</button>
-              <button type="button" onClick={() => { setShowPw(false); setPwError('') }} style={s.pwCancel}>Cancel</button>
-            </div>
-          </form>
+        <div className="modal-scrim" onClick={() => { setShowPw(false); setPwError('') }}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+            <form onSubmit={handleChangePassword}>
+              <div className="modal-head">
+                <span style={{ color: 'var(--accent)' }}>{Icon.key(17)}</span>
+                <h2>Change password</h2>
+                <button
+                  type="button"
+                  className="modal-close"
+                  onClick={() => { setShowPw(false); setPwError('') }}
+                  aria-label="Close"
+                >
+                  {Icon.x(14)}
+                </button>
+              </div>
+
+              <div className="modal-body">
+                <Field label="Current password">
+                  <input className="input" type="password" value={currentPassword} placeholder="••••••••"
+                    onChange={e => setCurrentPassword(e.target.value)} autoComplete="current-password" required />
+                </Field>
+                <Field label="New password" hint="At least 6 characters.">
+                  <input className="input" type="password" value={newPassword} placeholder="••••••••"
+                    onChange={e => setNewPassword(e.target.value)} autoComplete="new-password" required />
+                </Field>
+                <Field label="Confirm new password">
+                  <input className="input" type="password" value={confirm} placeholder="••••••••"
+                    onChange={e => setConfirm(e.target.value)} autoComplete="new-password" required />
+                </Field>
+
+                {pwError   && <Alert kind="error">{pwError}</Alert>}
+                {pwSuccess && <Alert kind="success">Password updated.</Alert>}
+              </div>
+
+              <div className="modal-foot">
+                <button className="btn btn-primary" type="submit" disabled={pwLoading}>
+                  {pwLoading ? <><Spinner /> Saving…</> : 'Save password'}
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  type="button"
+                  onClick={() => { setShowPw(false); setPwError('') }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
-      {/* Main */}
-      <main style={s.main}>
-
-        {/* Home */}
-        {!activeTool && (
+      {/* ---------- main ---------- */}
+      <main className="main">
+        {!activeTool && locked && (
           <>
-            <div style={s.greeting}>
-              <p style={s.greetingTime}>{getGreeting()}</p>
-              <h1 style={s.greetingTitle}>Welcome back.</h1>
-              <p style={s.greetingSub}>What are we working on today?</p>
+            <div className="page-head rv d1">
+              <span className="eyebrow"><span className="tick">◆</span>{active.label}</span>
+              <h1>{active.label} tools are <em>on the way.</em></h1>
+              <p>{active.blurb}</p>
             </div>
 
-            <p style={s.sectionLabel}>Tools</p>
-            <div style={s.grid}>
-              {TOOLS.map(tool => (
-                <button key={tool.id} onClick={() => setActiveTool(tool.id)} style={s.toolCard}>
-                  <div style={{ ...s.cardAccent, background: tool.accentColor }} />
-                  <div style={s.cardBody}>
-                    <div style={s.cardIconWrap}>
-                      <div style={{ ...s.cardIcon, background: tool.iconBg }}>{tool.icon}</div>
-                    </div>
-                    <p style={s.cardTitle}>{tool.title}</p>
-                    <p style={s.cardDesc}>{tool.sub}</p>
-                    <div style={s.cardFooter}>
-                      <span style={{ ...s.cardTag, background: tool.tagBg, color: tool.tagColor }}>{tool.tag}</span>
-                      <span style={{ ...s.cardArrow, color: tool.accentColor }}>→</span>
-                    </div>
-                  </div>
-                </button>
-              ))}
+            <section className="soon rv d2">
+              <div className="soon-badge">{Icon.sparkle(26)}</div>
+              <span className="eyebrow"><span className="tick">◆</span>In development</span>
+              <h2>We're building this now</h2>
+              <p>
+                The team is actively working on {active.label} tooling. Pokémon is the
+                only category with shipped tools today — switch back to it from the bar
+                above to keep working.
+              </p>
+              <div className="soon-bar"><i /></div>
+            </section>
+          </>
+        )}
+
+        {!activeTool && !locked && (
+          <>
+            <div className="page-head rv d1">
+              <span className="eyebrow"><span className="tick">◆</span>{getGreeting()}</span>
+              <h1>Welcome back to the <em>workspace.</em></h1>
+              <p>Your break reports, card sets, and stream schedule — all in one place.</p>
             </div>
 
-            {/* Upcoming Streams */}
-            {streams.length > 0 && (
-              <div style={s.streamsSection}>
-                <p style={s.sectionLabel}>Upcoming Streams</p>
-                <div style={s.streamsList}>
+            <div className="section rv d2" style={{ marginTop: 0 }}>
+              <div className="section-head">
+                <span className="kicker">Tools</span>
+                <span className="section-count">{String(TOOLS.length).padStart(2, '0')} available</span>
+              </div>
+
+              <div className="card-grid">
+                {TOOLS.map(tool => (
+                  <button key={tool.id} className="tool-card" onClick={() => setActiveTool(tool.id)}>
+                    <span className="tool-icon">{tool.icon(24)}</span>
+                    <h3>{tool.title}</h3>
+                    <p>{tool.sub}</p>
+                    <div className="tool-foot">
+                      <span className="chip">{tool.kicker}</span>
+                      <span className="tool-go">Open <span className="arr">{Icon.arrowRight(13)}</span></span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="section rv d3">
+              <div className="section-head">
+                <span className="kicker">Upcoming streams</span>
+                <span className="section-count">{String(streams.length).padStart(2, '0')} scheduled</span>
+              </div>
+
+              {streams.length === 0 ? (
+                <div className="empty">
+                  <p>No streams on the schedule.</p>
+                  <span>Add one from the sidebar to show it here.</span>
+                </div>
+              ) : (
+                <div className="row-list">
                   {streams.map(stream => {
                     const isLive = new Date(stream.starts_at) <= new Date()
                     return (
-                      <div key={stream.id} style={s.streamCard}>
-                        <div style={s.streamLeft}>
-                          <div style={{ ...s.streamLiveDot, background: isLive ? '#1d9e75' : '#2a2a4a' }} />
-                          <div>
-                            <a href={stream.url} target="_blank" rel="noreferrer" style={s.streamTitle}>{stream.title}</a>
-                            <p style={s.streamTime}>{formatStreamTime(stream.starts_at)}</p>
-                          </div>
+                      <div key={stream.id} className="row">
+                        <span className={isLive ? 'dot dot-live' : 'dot'} />
+                        <div className="row-main">
+                          <a className="row-title" href={stream.url} target="_blank" rel="noreferrer">
+                            <span className="nm">{stream.title}</span>
+                            {Icon.external(12)}
+                          </a>
+                          <p className="row-sub">{formatStreamTime(stream.starts_at)}</p>
                         </div>
-                        <div style={s.streamRight}>
-                          <span style={{ ...s.streamBadge, background: isLive ? '#0a1a0f' : '#0f0f1a', color: isLive ? '#1d9e75' : '#3a3a6a', border: `1px solid ${isLive ? '#0f3a20' : '#1e1e3a'}` }}>
+                        <div className="row-right">
+                          <span className={isLive ? 'chip chip-live' : 'chip'}>
                             {timeUntil(stream.starts_at)}
                           </span>
-                          <button onClick={() => handleDeleteStream(stream.id)} style={s.deleteBtn} title="Remove stream">✕</button>
+                          <button
+                            className="icon-btn"
+                            onClick={() => handleDeleteStream(stream.id)}
+                            title="Remove stream"
+                            aria-label={`Remove ${stream.title}`}
+                          >
+                            {Icon.x(13)}
+                          </button>
                         </div>
                       </div>
                     )
                   })}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </>
         )}
 
-        {/* Tool views */}
-        {activeTool && activeTool !== 'add-stream' && (
-          <div style={s.toolView}>
-            <button onClick={() => setActiveTool(null)} style={s.backBtn}>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M7 2L3 6l4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              Back to home
+        {activeTool && !locked && (
+          <div className="tool-view rv d1">
+            <button className="back-btn" onClick={() => setActiveTool(null)}>
+              {Icon.arrowLeft(13)} Back to home
             </button>
-            {activeTool === 'break-report' && <BreakReport availableSets={availableSets} onSetsRefresh={fetchSets} />}
-            {activeTool === 'card-sets'    && <CardSetManager onSetUploaded={fetchSets} />}
-          </div>
-        )}
 
-        {activeTool === 'add-stream' && (
-          <div style={s.toolView}>
-            <button onClick={() => setActiveTool(null)} style={s.backBtn}>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M7 2L3 6l4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              Back to home
-            </button>
-            <AddStream onStreamAdded={() => { fetchStreams(); setActiveTool(null) }} />
+            {activeTool === 'break-report' && <BreakReport availableSets={availableSets} onSetsRefresh={fetchSets} />}
+            {activeTool === 'break-roi'    && <BreakRoi />}
+            {activeTool === 'card-sets'    && <CardSetManager onSetUploaded={fetchSets} />}
+            {activeTool === ADD_STREAM.id  && (
+              <AddStream onStreamAdded={() => { fetchStreams(); setActiveTool(null) }} />
+            )}
           </div>
         )}
       </main>
 
-      {/* Status bar */}
-      <div style={s.statusBar}>
-        <div style={s.statusDot} />
-        <span style={s.statusText}>API connected · ripzillatcg.com</span>
-        <span style={s.statusClock}>{clock}</span>
-      </div>
+      {/* ---------- status bar ---------- */}
+      <footer className="statusbar">
+        <span className="dot dot-live" />
+        <span>API connected</span>
+        <span className="sep">/</span>
+        <span>ripzillatcg.com</span>
+        <span className="clock">{clock}</span>
+      </footer>
     </div>
   )
-}
-
-const s = {
-  page: { minHeight: '100vh', background: '#0a0a0f', fontFamily: "'Inter', sans-serif", color: '#e8e8f0', display: 'flex', flexDirection: 'column' },
-  overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 98 },
-  sidebar: { position: 'fixed', top: 0, left: 0, height: '100vh', width: '230px', background: '#0d0d14', borderRight: '1px solid #1a1a26', display: 'flex', flexDirection: 'column', transition: 'transform 0.24s cubic-bezier(.4,0,.2,1)', zIndex: 99 },
-  sbTop: { padding: '24px 18px 16px', borderBottom: '1px solid #1a1a26' },
-  sbLabel: { fontSize: '9px', letterSpacing: '2.5px', color: '#2a2a3a', textTransform: 'uppercase', marginBottom: '10px' },
-  sbUser: { display: 'flex', alignItems: 'center', gap: '10px' },
-  sbAvatar: { width: '32px', height: '32px', borderRadius: '50%', background: '#1a1a2e', border: '1px solid #2a2a4a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', color: '#5c5cff', flexShrink: 0 },
-  sbEmail: { fontSize: '11px', color: '#444460', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  sbNav: { padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: '2px', flex: 1, overflowY: 'auto' },
-  sbSection: { fontSize: '9px', letterSpacing: '2px', color: '#222235', textTransform: 'uppercase', padding: '10px 8px 4px', margin: 0 },
-  sbItem: { display: 'flex', alignItems: 'center', gap: '10px', background: 'transparent', border: 'none', borderRadius: '8px', color: '#333350', fontSize: '13px', padding: '10px 10px', cursor: 'pointer', width: '100%', textAlign: 'left' },
-  sbActive: { background: '#1a1a2e', color: '#e8e8f0', borderLeft: '2px solid #5c5cff', paddingLeft: '8px' },
-  sbDivider: { height: '1px', background: '#1a1a26', margin: '8px 0' },
-  nav: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 28px', height: '60px', background: '#0d0d14', borderBottom: '1px solid #1a1a26', position: 'sticky', top: 0, zIndex: 50 },
-  navLeft: { display: 'flex', alignItems: 'center', gap: '16px' },
-  hamburger: { background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '5px', padding: '6px', borderRadius: '6px' },
-  hline: { display: 'block', width: '20px', height: '2px', background: '#888899', borderRadius: '2px', transition: 'all 0.22s ease' },
-  breadcrumb: { display: 'flex', alignItems: 'center', gap: '10px' },
-  navLogo: { fontSize: '13px', fontWeight: '800', letterSpacing: '5px', color: '#e8e8f0', cursor: 'pointer' },
-  sep: { color: '#2a2a3a', fontSize: '16px' },
-  pageName: { fontSize: '13px', color: '#555570' },
-  navRight: { display: 'flex', alignItems: 'center', gap: '10px' },
-  navEmail: { fontSize: '12px', color: '#2a2a3a' },
-  onlineDot: { width: '7px', height: '7px', borderRadius: '50%', background: '#1d9e75' },
-  pwBanner: { background: '#0d0d14', borderBottom: '1px solid #1a1a26', padding: '28px 40px' },
-  pwForm: { maxWidth: '860px', margin: '0 auto' },
-  pwHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' },
-  pwTitle: { color: '#e8e8f0', fontSize: '15px', fontWeight: '600', margin: 0 },
-  pwClose: { background: 'transparent', border: 'none', color: '#555570', fontSize: '16px', cursor: 'pointer' },
-  pwFields: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', marginBottom: '16px' },
-  field: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  label: { fontSize: '12px', color: '#555570', letterSpacing: '0.5px' },
-  input: { background: '#0a0a0f', border: '1px solid #1e1e2e', borderRadius: '8px', padding: '10px 12px', color: '#e8e8f0', fontSize: '13px', outline: 'none' },
-  error: { color: '#ff5555', fontSize: '13px', margin: '0 0 12px', padding: '10px 14px', background: '#1a0d0d', borderRadius: '8px', border: '1px solid #3a1a1a' },
-  success: { color: '#55cc55', fontSize: '13px', margin: '0 0 12px', padding: '10px 14px', background: '#0d1a0d', borderRadius: '8px', border: '1px solid #1a3a1a' },
-  pwActions: { display: 'flex', gap: '10px' },
-  pwSave: { background: '#5c5cff', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 22px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' },
-  pwCancel: { background: 'transparent', border: '1px solid #1e1e2e', borderRadius: '8px', color: '#555570', padding: '10px 22px', fontSize: '13px', cursor: 'pointer' },
-  main: { flex: 1, maxWidth: '960px', width: '100%', margin: '0 auto', padding: '64px 32px' },
-  greeting: { marginBottom: '56px', textAlign: 'center' },
-  greetingTime: { fontSize: '11px', letterSpacing: '3px', color: '#2a2a4a', textTransform: 'uppercase', marginBottom: '14px' },
-  greetingTitle: { fontSize: '42px', fontWeight: '700', color: '#e8e8f0', margin: '0 0 10px' },
-  greetingSub: { fontSize: '16px', color: '#333350' },
-  sectionLabel: { fontSize: '11px', letterSpacing: '2px', color: '#2a2a4a', textTransform: 'uppercase', marginBottom: '20px', textAlign: 'center' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' },
-  toolCard: { background: '#0d0d14', border: '1px solid #1a1a26', borderRadius: '18px', padding: '0', cursor: 'pointer', textAlign: 'left', overflow: 'hidden', transition: 'border-color 0.15s, transform 0.12s', width: '100%' },
-  cardAccent: { height: '4px' },
-  cardBody: { padding: '32px 28px 28px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' },
-  cardIconWrap: { marginBottom: '20px' },
-  cardIcon: { width: '64px', height: '64px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  cardTitle: { fontSize: '20px', fontWeight: '700', color: '#e8e8f0', margin: '0 0 10px' },
-  cardDesc: { fontSize: '14px', color: '#3a3a55', lineHeight: '1.7', margin: '0 0 20px' },
-  cardFooter: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' },
-  cardTag: { fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase', padding: '4px 10px', borderRadius: '5px', fontWeight: '600' },
-  cardArrow: { fontSize: '20px', fontWeight: '300' },
-  streamsSection: { marginTop: '56px' },
-  streamsList: { display: 'flex', flexDirection: 'column', gap: '10px' },
-  streamCard: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0d0d14', border: '1px solid #1a1a26', borderRadius: '12px', padding: '16px 20px' },
-  streamLeft: { display: 'flex', alignItems: 'center', gap: '14px' },
-  streamLiveDot: { width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0 },
-  streamTitle: { fontSize: '14px', fontWeight: '600', color: '#c8c8d8', textDecoration: 'none', display: 'block', marginBottom: '3px' },
-  streamTime: { fontSize: '12px', color: '#333350', margin: 0 },
-  streamRight: { display: 'flex', alignItems: 'center', gap: '10px' },
-  streamBadge: { fontSize: '11px', fontWeight: '600', padding: '4px 10px', borderRadius: '6px' },
-  deleteBtn: { background: 'transparent', border: 'none', color: '#2a2a3a', fontSize: '13px', cursor: 'pointer', padding: '4px 6px', borderRadius: '4px' },
-  toolView: { display: 'flex', flexDirection: 'column', gap: '24px' },
-  backBtn: { display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: '1px solid #1a1a26', borderRadius: '8px', color: '#333350', fontSize: '13px', padding: '8px 16px', cursor: 'pointer', alignSelf: 'flex-start' },
-  statusBar: { display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 28px', background: '#0d0d14', borderTop: '1px solid #1a1a26' },
-  statusDot: { width: '6px', height: '6px', borderRadius: '50%', background: '#1d9e75' },
-  statusText: { fontSize: '11px', color: '#1a3a28', letterSpacing: '0.5px' },
-  statusClock: { marginLeft: 'auto', fontSize: '11px', color: '#1e1e2e' },
 }
