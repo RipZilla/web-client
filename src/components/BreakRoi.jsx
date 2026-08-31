@@ -291,7 +291,12 @@ function ResultView({ result, view, manual, setManual }) {
             const lineTotal = typed === null ? null : round2(typed * item.quantity)
             return (
               <div key={i} className={`unpriced-row${typed !== null ? ' done' : ''}`}>
-                <span className="up-qty">×{item.quantity}</span>
+                <span className="up-qty">
+                  ×{item.quantity}
+                  {item.lot_multiplier > 1 && (
+                    <span className="qty-note">{item.spots}×{item.lot_multiplier}</span>
+                  )}
+                </span>
                 <div className="up-main">
                   <span className="up-name" title={item.raw_text}>{item.raw_text}</span>
                   {item.needs_review && (
@@ -374,7 +379,14 @@ function ResultView({ result, view, manual, setManual }) {
                     {item.matched_name || <span className="no-match">No match</span>}
                     {item.confidence === 'low' && <span className="chip chip-info sm">low confidence</span>}
                   </td>
-                  <td className="num">{item.quantity}</td>
+                  <td className="num">
+                    {item.quantity}
+                    {item.lot_multiplier > 1 && (
+                      <span className="qty-note" title={`${item.spots} spots x ${item.lot_multiplier} per spot`}>
+                        {item.spots}×{item.lot_multiplier}
+                      </span>
+                    )}
+                  </td>
                   <td className="num">
                     {unit === null ? '—' : money(unit)}
                     {usingTyped && <span className="up-flag" title="Price you entered">·</span>}

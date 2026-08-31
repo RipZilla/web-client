@@ -802,6 +802,8 @@
   display:flex;align-items:center;gap:12px;flex-wrap:wrap;
 }
 .unpriced-note{font-size:11.5px;color:var(--muted)}
+/* Explains a quantity that is larger than the spot count: 6 spots x 5 packs. */
+.qty-note{display:block;font-size:10px;color:var(--faint);letter-spacing:.02em}
 .up-input{width:112px;flex:none}
 .up-input .input{height:36px;font-size:13px}
 
