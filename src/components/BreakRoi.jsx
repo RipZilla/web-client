@@ -65,7 +65,21 @@ export default function BreakRoi() {
         body: JSON.stringify({ rawText, feePercent }),
       })
       if (!res.ok) throw new Error(await errorFrom(res, 'Could not analyze this break'))
-      setResult(await res.json())
+      const data = await res.json()
+      setResult(data)
+
+      // A weak match is uncertain, not absent. Leaving it blank made a correct
+      // match read as "no price" and quietly dropped it from invested -- the
+      // same understatement the review flow exists to prevent, just arrived at
+      // from the other side. Seed the field with the catalog's own guess so the
+      // total is complete, and keep the row listed so it still gets confirmed.
+      const seeded = {}
+      data.lineItems.forEach((item, i) => {
+        if (item.needs_review && item.suggested_price !== null) {
+          seeded[i] = String(item.suggested_price)
+        }
+      })
+      setManual(seeded)
     } catch (e) {
       // A 401 means the session ended — say that, don't blame the network.
       setError(e.message)
@@ -90,10 +104,16 @@ export default function BreakRoi() {
       (item, i) => !item.priced && enteredPrice(manual[i]) === null,
     ).length
 
+    const seededCount = result.lineItems.filter((item, i) => {
+      if (!item.needs_review || item.suggested_price === null) return false
+      return enteredPrice(manual[i]) === item.suggested_price
+    }).length
+
     const fee = feeValid ? feePercent : result.feePercent
     return {
       invested,
       stillUnpriced,
+      seededCount,
       feePercent: fee,
       ...summarize({ revenue: result.revenue, feePercent: fee, invested }),
     }
@@ -203,6 +223,14 @@ function ResultView({ result, view, manual, setManual }) {
           <b>{view.stillUnpriced} of {result.lineItems.length} line items have no catalog price.</b>{' '}
           They are left out of the invested total below, so treat it as a floor —
           the real ROI is lower than what's shown. Enter prices to correct it.
+        </Alert>
+      )}
+
+      {view.seededCount > 0 && (
+        <Alert kind="note">
+          <b>{view.seededCount} match{view.seededCount === 1 ? '' : 'es'} scored low and {view.seededCount === 1 ? 'is' : 'are'} counted at the catalog's best guess.</b>{' '}
+          They're included in the total below and listed for confirmation — worth
+          a glance, since a wrong guess moves ROI.
         </Alert>
       )}
 
