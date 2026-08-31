@@ -12,8 +12,25 @@
 
 import { supabase } from '../supabaseClient'
 
-const API_URL      = import.meta.env.VITE_API_URL
-const RISK_API_URL = import.meta.env.VITE_RISK_API_URL
+/**
+ * A base URL with no scheme is a *relative path* to fetch(), so
+ * "my-service.up.railway.app" silently resolves against our own origin and
+ * 404s from the frontend host instead of ever reaching the service. Easy
+ * mistake to make in a hosting dashboard and confusing to debug, so normalise
+ * it here and say so.
+ */
+function normalizeBase(url, name) {
+  if (!url) return ''
+  let base = url.trim().replace(/\/+$/, '')  // no trailing slash; paths add their own
+  if (!/^https?:\/\//i.test(base)) {
+    console.warn(`${name} is missing https:// — assuming https://${base}`)
+    base = `https://${base}`
+  }
+  return base
+}
+
+const API_URL      = normalizeBase(import.meta.env.VITE_API_URL, 'VITE_API_URL')
+const RISK_API_URL = normalizeBase(import.meta.env.VITE_RISK_API_URL, 'VITE_RISK_API_URL')
 
 export const SESSION_EXPIRED_MESSAGE = 'Your session has expired. Please sign in again.'
 

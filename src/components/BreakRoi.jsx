@@ -20,6 +20,18 @@ function summarize({ revenue, feePercent, invested }) {
   }
 }
 
+/**
+ * A typed price of 0 is a real answer -- "this is a known dud" -- and must be
+ * distinguishable from "I haven't looked at this yet". Using `> 0` as the test
+ * meant a stack of 238 worthless packs could never clear the optimistic-ROI
+ * caveat. Returns the number, or null when nothing has been entered.
+ */
+function enteredPrice(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return null
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
 const money = (n) =>
   n.toLocaleString(undefined, { style: 'currency', currency: 'USD' })
 
@@ -69,13 +81,13 @@ export default function BreakRoi() {
 
     const manualTotal = result.lineItems.reduce((sum, item, i) => {
       if (item.priced) return sum
-      const v = Number(manual[i])
-      return Number.isFinite(v) && v > 0 ? sum + v * item.quantity : sum
+      const v = enteredPrice(manual[i])
+      return v === null ? sum : sum + v * item.quantity
     }, 0)
 
     const invested = round2(result.invested + manualTotal)
     const stillUnpriced = result.lineItems.filter(
-      (item, i) => !item.priced && !(Number(manual[i]) > 0),
+      (item, i) => !item.priced && enteredPrice(manual[i]) === null,
     ).length
 
     const fee = feeValid ? feePercent : result.feePercent
@@ -161,9 +173,21 @@ export default function BreakRoi() {
 
 function ResultView({ result, view, manual, setManual }) {
   const up = view.profit >= 0
+  // Biggest stacks first: one entry on a 238x line moves the total far more
+  // than a 1x line, so it should not be buried at the bottom of the list.
   const unpriced = result.lineItems
     .map((item, i) => ({ item, i }))
     .filter(({ item }) => !item.priced)
+    .sort((a, b) => b.item.quantity - a.item.quantity)
+
+  // Only genuinely unmatched items are safe to bulk-zero. A weak match already
+  // has a candidate price, so it needs a decision, not a default.
+  const bulkZeroable = unpriced.filter(
+    ({ item, i }) => !item.needs_review && enteredPrice(manual[i]) === null,
+  )
+  const reviewPending = unpriced.filter(
+    ({ item, i }) => item.needs_review && enteredPrice(manual[i]) === null,
+  ).length
 
   // The meter reads "how much of what you kept did the product cost you".
   // Over 100% means the break lost money, so the fill saturates and turns.
@@ -172,7 +196,7 @@ function ResultView({ result, view, manual, setManual }) {
 
   return (
     <div className="roi-out rv d1">
-      {result.warnings.map((w, i) => <Alert key={i} kind="error">{w}</Alert>)}
+      {result.warnings.map((w, i) => <Alert key={i} kind="warn">{w}</Alert>)}
 
       {view.stillUnpriced > 0 && (
         <Alert kind="warn">
@@ -227,28 +251,74 @@ function ResultView({ result, view, manual, setManual }) {
       {unpriced.length > 0 && (
         <div className="unpriced">
           <div className="unpriced-head">
-            <span className="kicker">No catalog price</span>
-            <p>Enter what these cost you and every total above updates.</p>
+            <span className="kicker">Needs a price</span>
+            <p>
+              Largest quantities first — those move the total most. A price of
+              <b> $0</b> is a valid answer for a known dud and counts as settled.
+            </p>
           </div>
-          {unpriced.map(({ item, i }) => (
-            <div key={i} className="unpriced-row">
-              <span className="up-name" title={item.raw_text}>{item.raw_text}</span>
-              <span className="up-qty">×{item.quantity}</span>
-              <div className="suffix-field up-input">
-                <span className="prefix">$</span>
-                <input
-                  className="input"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={manual[i] ?? ''}
-                  onChange={e => setManual(m => ({ ...m, [i]: e.target.value }))}
-                  aria-label={`Unit price for ${item.raw_text}`}
-                />
+
+          {unpriced.map(({ item, i }) => {
+            const typed = enteredPrice(manual[i])
+            const lineTotal = typed === null ? null : round2(typed * item.quantity)
+            return (
+              <div key={i} className={`unpriced-row${typed !== null ? ' done' : ''}`}>
+                <span className="up-qty">×{item.quantity}</span>
+                <div className="up-main">
+                  <span className="up-name" title={item.raw_text}>{item.raw_text}</span>
+                  {item.needs_review && (
+                    <span className="up-why">
+                      weak match: {item.matched_name}
+                      {item.suggested_price !== null && ` at ${money(item.suggested_price)}`}
+                      {item.match_score !== null && ` · score ${item.match_score}`}
+                    </span>
+                  )}
+                </div>
+                <span className="up-line">
+                  {lineTotal === null ? '' : money(lineTotal)}
+                </span>
+                <div className="suffix-field up-input">
+                  <span className="prefix">$</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder={item.suggested_price !== null ? String(item.suggested_price) : '0.00'}
+                    value={manual[i] ?? ''}
+                    onChange={e => setManual(m => ({ ...m, [i]: e.target.value }))}
+                    aria-label={`Unit price for ${item.raw_text}`}
+                  />
+                </div>
               </div>
+            )
+          })}
+
+          {bulkZeroable.length > 0 && (
+            <div className="unpriced-foot">
+              <button
+                className="btn btn-quiet"
+                onClick={() => setManual(m => {
+                  const next = { ...m }
+                  // Blank entries only — never overwrites a typed price. And
+                  // never touches a weak match: those carry a real candidate
+                  // price, so bulk-zeroing one would quietly delete value
+                  // (the SPC line here is a genuine $263.72 item).
+                  bulkZeroable.forEach(({ i }) => { next[i] = '0' })
+                  return next
+                })}
+              >
+                Mark {bulkZeroable.length} unmatched item
+                {bulkZeroable.length === 1 ? '' : 's'} as $0
+              </button>
+              {reviewPending > 0 && (
+                <span className="unpriced-note">
+                  {reviewPending} weak match{reviewPending === 1 ? '' : 'es'} left out —
+                  confirm {reviewPending === 1 ? 'it' : 'them'} individually.
+                </span>
+              )}
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -266,8 +336,8 @@ function ResultView({ result, view, manual, setManual }) {
           </thead>
           <tbody>
             {result.lineItems.map((item, i) => {
-              const typed = Number(manual[i])
-              const usingTyped = !item.priced && typed > 0
+              const typed = enteredPrice(manual[i])
+              const usingTyped = !item.priced && typed !== null
               const unit = item.priced ? item.unit_price : usingTyped ? typed : null
               return (
                 <tr key={i} className={unit === null ? 'is-unpriced' : ''}>
